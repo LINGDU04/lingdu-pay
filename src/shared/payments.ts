@@ -41,6 +41,7 @@ export interface PaymentAddress {
 
 export interface PaymentData {
   id: string;
+  optional?: boolean;
   helpKey?: string;
   nameKey: string;
 }
@@ -161,6 +162,7 @@ export function normalizeAssetCsv(raw: unknown, fallback: readonly string[] = []
 }
 
 export const trc20: Payment = {
+  data: [{ id: "apiKey", optional: true, nameKey: "payment.trongrid.api_key", helpKey: "payment.trongrid.api_key_help" }],
   address: {
     helpKey: "payment.help.tron",
     nameKey: "payment.address.tron",
