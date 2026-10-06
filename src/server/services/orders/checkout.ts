@@ -100,13 +100,16 @@ async function selectPayment(env: AppEnv, order: Order, asset: string, network: 
   if (!channels.length) throw new AppError(400, "errors.payment_network_unavailable");
   const channel = channels[randomIndex(channels.length)];
   const rate = await rateContext(env);
-  const amount = await uniqueAmount(env, channel, order.id, targetAsset, payAmount(order.amount, order.currency, targetAsset, rate));
+  const exactAmount = order.currency.toUpperCase() === "USDT" && targetAsset === "usdt";
+  const amount = await uniqueAmount(env, channel, order.id, targetAsset, payAmount(order.amount, order.currency, targetAsset, rate), exactAmount);
   const snapshot = preserveEzfpContext(
     order.payment,
     await createPayment(channel, order, assignPayment(channel, amount, targetAsset)),
   );
   const ts = now();
-  if (refreshWindow) {
+  if (exactAmount && !refreshWindow) {
+    await reserveExactPayment(env, order.id, channel.id, snapshot, ts);
+  } else if (refreshWindow) {
     await refreshOrderPaymentWindow(env, order.id, channel.id, snapshot, rate.settings.timeout, ts);
   } else {
     await setOrderPayment(env, order.id, channel.id, snapshot, ts);
@@ -114,7 +117,7 @@ async function selectPayment(env: AppEnv, order: Order, asset: string, network: 
   return snapshot;
 }
 
-async function uniqueAmount(env: AppEnv, channel: PaymentChannel, orderId: string, asset: string, amount: number) {
+async function uniqueAmount(env: AppEnv, channel: PaymentChannel, orderId: string, asset: string, amount: number, exactAmount = false) {
   const rows = await all<{ id: string; payment: string }>(
     env,
     "SELECT id, payment FROM orders WHERE status = 'pending' AND expire_at > ? AND payway = ? AND id <> ?",
@@ -131,8 +134,22 @@ async function uniqueAmount(env: AppEnv, channel: PaymentChannel, orderId: strin
   });
 
   let next = ceilAmount(amount);
+  if (exactAmount && used.some((value) => sameAmount(value, next))) throw new AppError(409, "errors.exact_amount_busy");
   while (used.some((value) => sameAmount(value, next))) next = ceilAmount(next + 0.01);
   return next;
+}
+
+/** Reserve an exact amount atomically so concurrent orders cannot share a payment. */
+export async function reserveExactPayment(env: AppEnv, orderId: string, payway: number, payment: PaymentSnapshot, ts = now()) {
+  if (!payment.address || !payment.currency || !Number.isFinite(payment.amount)) throw new AppError(400, "errors.payment_network_unavailable");
+  const result = await run(env, `UPDATE orders SET payway = ?, payment = ?, updated_at = ?
+    WHERE id = ? AND status = 'pending' AND expire_at > ? AND NOT EXISTS (
+      SELECT 1 FROM orders AS other WHERE other.id <> ? AND other.status = 'pending' AND other.expire_at > ?
+      AND json_extract(other.payment, '$.address') = ?
+      AND lower(json_extract(other.payment, '$.currency')) = ?
+      AND abs(CAST(json_extract(other.payment, '$.amount') AS REAL) - ?) < 0.00000001
+    )`, payway, JSON.stringify(payment), ts, orderId, ts, orderId, ts, payment.address, key(payment.currency), payment.amount);
+  if (result.meta.changes !== 1) throw new AppError(409, "errors.exact_amount_busy");
 }
 
 export async function markPaid(env: AppEnv, order: Order, tx: PaymentTxInput) {
