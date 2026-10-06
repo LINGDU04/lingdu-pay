@@ -9,7 +9,8 @@ import { trc20Candidate, trc20ContractMatches, trxCandidate, type TronGridNative
 import type { TxCandidate } from "@/shared/types/domain";
 
 export async function check(channel: PaymentChannel) {
-  const result = await fetchJson<{ data?: unknown[] }>(`https://api.trongrid.io/v1/accounts/${encodeURIComponent(channel.address)}`);
+  const apiKey = String(channel.data.apiKey ?? "").trim();
+  const result = await fetchJson<{ data?: unknown[] }>(`https://api.trongrid.io/v1/accounts/${encodeURIComponent(channel.address)}`, { headers: apiKey ? { "TRON-PRO-API-KEY": apiKey } : {} });
   if (!Array.isArray(result.data)) throw new Error("TronGrid response is invalid");
 }
 
@@ -23,11 +24,12 @@ async function transactions(input: PaymentCheckInput) {
   const from = Math.min(...input.orders.map((order) => order.createdAt));
   const assets = Array.from(new Set(input.orders.map((order) => key(order.snapshot.currency)).filter(Boolean)));
   const txs = [];
-  for (const asset of assets) txs.push(...await scanAsset(address, asset, from, input.fastConfirm));
+  const apiKey = String(input.channel?.data.apiKey ?? "").trim();
+  for (const asset of assets) txs.push(...await scanAsset(address, asset, from, input.fastConfirm, apiKey));
   return txs;
 }
 
-async function scanAsset(address: string, asset: string, from: number, fast: boolean) {
+async function scanAsset(address: string, asset: string, from: number, fast: boolean, apiKey: string) {
   const params = new URLSearchParams({
     limit: "50",
     min_timestamp: String(Math.max(0, from) * 1000),
@@ -36,7 +38,7 @@ async function scanAsset(address: string, asset: string, from: number, fast: boo
 
   if (asset === "trx") {
     params.set("only_to", "true");
-    return (await tronGrid<TronGridNativeTx>(address, "transactions", params))
+    return (await tronGrid<TronGridNativeTx>(address, "transactions", params, apiKey))
       .map((item) => trxCandidate(item, address))
       .filter((item): item is TxCandidate => item !== null);
   }
@@ -44,7 +46,7 @@ async function scanAsset(address: string, asset: string, from: number, fast: boo
   const tokenAsset = trc20Assets[asset];
   if (tokenAsset) {
     params.set("contract_address", tokenAsset.contract);
-    return (await tronGrid<TronGridTokenTx>(address, "transactions/trc20", params))
+    return (await tronGrid<TronGridTokenTx>(address, "transactions/trc20", params, apiKey))
       .map((item) => trc20Candidate(item, asset))
       .filter((item): item is TxCandidate => item !== null);
   }
@@ -52,9 +54,9 @@ async function scanAsset(address: string, asset: string, from: number, fast: boo
   return [];
 }
 
-async function tronGrid<T>(address: string, path: string, params: URLSearchParams) {
+async function tronGrid<T>(address: string, path: string, params: URLSearchParams, apiKey: string) {
   const url = `https://api.trongrid.io/v1/accounts/${encodeURIComponent(address)}/${path}?${params}`;
-  const result = await fetchJson<{ data?: T[] }>(url);
+  const result = await fetchJson<{ data?: T[] }>(url, { headers: apiKey ? { "TRON-PRO-API-KEY": apiKey } : {} });
   if (!Array.isArray(result.data)) throw new Error("TronGrid response is invalid");
   return result.data;
 }
