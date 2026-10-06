@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "hashpay",
+  "name": "lingdu-pay",
+  "preview_urls": false,
   "main": "src/index.ts",
   "compatibility_date": "2026-06-14",
   "compatibility_flags": ["nodejs_compat"],
@@ -20,6 +21,7 @@
     {
       "binding": "DB",
       "database_name": "hashpay",
+      "database_id": "2d3bdd6b-00e3-455b-aac2-2fcd65e73e2d",
       "migrations_dir": "src/server/db/d1/migrations"
     }
   ],
