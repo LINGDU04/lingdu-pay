@@ -135,6 +135,7 @@ export function marketAmount(amount: number, from: string, to: string, rate: Rat
 }
 
 export function payAmount(amount: number, from: string, to: string, rate: RateContext) {
+  if (from.trim().toUpperCase() === "USDT" && to.trim().toUpperCase() === "USDT") return ceilAmount(amount);
   const adjusted = convert(amount, from || rate.settings.currency, to, rate)
     .div(new Decimal(1).plus(new Decimal(rate.rateAdjust).div(100)));
   return ceilAmount(adjusted);
